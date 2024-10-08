@@ -56,7 +56,7 @@ sendfd(int sd, int fd)
 	mh.msg_namelen = 0;
 	mh.msg_iov = &iv;
 	mh.msg_iovlen = 1;
-	mh.msg_control = (caddr_t)ptr;
+	mh.msg_control = (void *)ptr;
 	mh.msg_controllen = len;
 	mh.msg_flags = 0;
 
