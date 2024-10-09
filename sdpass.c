@@ -35,14 +35,11 @@ sendfd(int sd, int fd)
 	// Construct the message header.  Points to the dummy
 	// data and the space for the control message.
 	memset(&mh, 0, sizeof(mh));
-	mh.msg_name = NULL;
-	mh.msg_namelen = 0;
 	mh.msg_iov = &iv;
 	mh.msg_iovlen = 1;
 	memset(space, 0, sizeof space);
 	mh.msg_control = (void *)space;
 	mh.msg_controllen = sizeof space;
-	mh.msg_flags = 0;
 
 	// Fill in the control message.
 	cmsg = CMSG_FIRSTHDR(&mh);
@@ -95,20 +92,15 @@ recvfd(int sd, int *fdp)
 	// Fill in the msghdr structure.  `recvmsg(2)` will
 	// update it.
 	memset(&mh, 0, sizeof(mh));
-	mh.msg_name = NULL;
-	mh.msg_namelen = 0;
 	mh.msg_iov = &iv;
 	mh.msg_iovlen = 1;
 	memset(space, 0, sizeof space);
 	mh.msg_control = (void *)space;
 	mh.msg_controllen = sizeof space;
-	mh.msg_flags = 0;
 
 	ret = recvmsg(sd, &mh, 0);
 	if (ret <= 0)
 		return ret;
-	if (mh.msg_flags != 0)
-		return -1;
 	cmsg = CMSG_FIRSTHDR(&mh);
 	if (cmsg == NULL ||
 	    cmsg->cmsg_len != CMSG_LEN(sizeof(int)) ||
