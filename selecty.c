@@ -5,10 +5,13 @@
 // Dan Cross <cross@gajendra.net>
 
 #include <sys/types.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <netinet/in.h>
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -173,40 +176,89 @@ dispatcher(int sdworker, int port)
 	exit(EXIT_FAILURE);
 }
 
-static void
+static bool
 echo(int sd)
 {
 	char *p;
 	char buf[1024];
 	ssize_t nb, wb;
 
-	for (;;) {
-		nb = read(sd, buf, sizeof buf);
-		if (nb < 0)
-			perror("read");
-		if (nb <= 0)
-			return;
-		p = buf;
-		while (nb > 0) {
-			wb = write(sd, p, nb);
-			if (wb < 0)
-				perror("write");
-			if (wb <= 0)
-				return;
-			nb -= wb;
-			p += wb;
-		}
+	nb = read(sd, buf, sizeof buf);
+	if (nb < 0)
+		perror("read");
+	if (nb <= 0)
+		return false;
+	p = buf;
+	while (nb > 0) {
+		wb = write(sd, p, nb);
+		if (wb < 0)
+			perror("write");
+		if (wb <= 0)
+			return false;
+		nb -= wb;
+		p += wb;
 	}
+
+	return true;
 }
 
 void
 worker(int sddispatcher)
 {
-	int sd;
+	int sd, nsds, maxsd, flags;
+	fd_set allsds, rsds;
 
-	while (recvfd(sddispatcher, &sd) > 0) {
-		echo(sd);
-		close(sd);
+	flags = fcntl(sddispatcher, F_GETFL, 0);
+	if (flags < 0) {
+		perror("fcntl get flags");
+		close(sddispatcher);
+		return;
+	}
+	if (fcntl(sddispatcher, F_SETFL, flags | O_NONBLOCK) < 0) {
+		perror("fcntl set flags");
+		close(sddispatcher);
+		return;
+	}
+	if (sddispatcher != 0) {
+		if (dup2(sddispatcher, 0) < 0) {
+			perror("dup2");
+			close(sddispatcher);
+			return;
+		}
+		close(sddispatcher);
+	}
+
+	FD_ZERO(&allsds);
+	FD_SET(0, &allsds);
+	maxsd = 0;
+	for (;;) {
+		rsds = allsds;
+		nsds = select(maxsd + 1, &rsds, NULL, NULL, NULL);
+		if (nsds < 0) {
+			perror("select");
+			return;
+		}
+		for (sd = 1; sd <= maxsd; sd++) {
+			if (FD_ISSET(sd, &rsds)) {
+				if (!echo(sd)) {
+					FD_CLR(sd, &allsds);
+					if (sd == maxsd)
+						--maxsd;
+					close(sd);
+				}
+			}
+		}
+		if (FD_ISSET(0, &rsds)) {
+			if (recvfd(0, &sd) < 0) {
+				if (errno == EWOULDBLOCK)
+					continue;
+				break;
+			}
+			printf("pid %d won the race for sd %d\n", getpid(), sd);
+			if (sd > maxsd)
+				maxsd = sd;
+			FD_SET(sd, &allsds);
+		}
 	}
 }
 

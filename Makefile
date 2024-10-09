@@ -1,7 +1,7 @@
-PROGS=		mpaccept sdpass
+PROGS=		mpaccept sdpass selecty
 
 CC=		cc
-CFLAGS=		-g -Werror -Wall -Wextra -pedantic -std=c2x
+CFLAGS=		-g -Werror -Wall -Wextra -pedantic -std=c11
 
 all:		${PROGS}
 
