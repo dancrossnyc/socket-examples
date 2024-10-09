@@ -1,4 +1,5 @@
 *.o
+loadgen
 mpaccept
 sdpass
 selecty
