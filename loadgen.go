@@ -16,7 +16,7 @@ func check(ctx string, err error) {
 
 func genload(address string, done chan bool) {
 	conn, err := net.Dial("tcp", address)
-	check("dial", err)
+	check("dialing address:", err)
 	defer conn.Close()
 	data := make([]byte, 1024)
 	rand.Read(data)
@@ -25,9 +25,9 @@ func genload(address string, done chan bool) {
 		var nw, nr int
 		var err error
 		nw, err = conn.Write(data)
-		check("write", err)
+		check("writing data:", err)
 		nr, err = conn.Read(buf)
-		check("read", err)
+		check("reading response:", err)
 		if nw != nr {
 			log.Fatal("nr != nw")
 		}
