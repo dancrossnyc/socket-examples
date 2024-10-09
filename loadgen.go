@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -26,7 +27,7 @@ func genload(address string, done chan bool) {
 		var err error
 		nw, err = conn.Write(data)
 		check("writing data:", err)
-		nr, err = conn.Read(buf)
+		nr, err = io.ReadFull(conn, buf)
 		check("reading response:", err)
 		if nw != nr {
 			log.Fatal("nr != nw")
