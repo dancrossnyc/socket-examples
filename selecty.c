@@ -152,12 +152,14 @@ dispatcher(int sdworker, int port)
 	struct sockaddr_in sa;
 	struct sockaddr_in6 sa6;
 	fd_set sds;
+	int one;
 
 	sd = socket(PF_INET, SOCK_STREAM, 0);
 	if (sd < 0) {
 		perror("socket");
 		exit(EXIT_FAILURE);
 	}
+
 	sd6 = socket(PF_INET6, SOCK_STREAM, 0);
 	if (sd6 < 0) {
 		perror("socket6");
@@ -176,6 +178,9 @@ dispatcher(int sdworker, int port)
 		perror("bind");
 		exit(EXIT_FAILURE);
 	}
+
+	one = 1;
+	(void)setsockopt(sd6, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof one);
 
 	memset(&sa6, 0, sizeof sa6);
 	sa6.sin6_family = AF_INET6;
