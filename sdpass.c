@@ -30,10 +30,21 @@ sendfd(int sd, int fd)
 	struct cmsghdr *cmsg;
 	alignas(struct msghdr) char space[CMSG_SPACE(sizeof(int))];
 	int ret;
-	char dummy;
+	char ndesc;
 
-	// Construct the message header.  Points to the dummy
-	// data and the space for the control message.
+	// We send a single byte containing the number of
+	// descriptors we are sending.  This is not strictly
+	// necessary, as the number is always 1, but some
+	// implementations do not pass control data with an
+	// otherwise empty data transfer, and this is a useful
+	// value to check on the receiving side.
+	ndesc = 1;
+	memset(&iv, 0, sizeof(iv));
+	iv.iov_base = &ndesc;
+	iv.iov_len = 1;
+
+	// Construct the message header.  Points to the iovec
+	// and the space for the control message.
 	memset(&mh, 0, sizeof(mh));
 	mh.msg_iov = &iv;
 	mh.msg_iovlen = 1;
@@ -47,14 +58,6 @@ sendfd(int sd, int fd)
 	cmsg->cmsg_level = SOL_SOCKET;
 	cmsg->cmsg_type = SCM_RIGHTS;
 	memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
-
-	// We send a single byte of dummy data in case the
-	// implementation does not pass control data with an
-	// otherwise empty data transfer.
-	dummy = 0;
-	memset(&iv, 0, sizeof(iv));
-	iv.iov_base = &dummy;
-	iv.iov_len = 1;
 
 	// Loop in case there's no room in the kernel buffer
 	// to send.  Cf.Stevens et al.
@@ -77,16 +80,16 @@ recvfd(int sd, int *fdp)
 	struct cmsghdr *cmsg;
 	alignas(struct msghdr) char space[CMSG_SPACE(sizeof(int))];
 	int ret;
-	char dummy;
+	char ndesc;
 
 	if (fdp == NULL)
 		return -1;
 
-	// Fill in an iovec to receive one byte of dummy data.
+	// Fill in an iovec to receive one byte of data.
 	// Required on some systems that do not pass control
 	// messages on empty data transfers.
 	memset(&iv, 0, sizeof(iv));
-	iv.iov_base = &dummy;
+	iv.iov_base = &ndesc;
 	iv.iov_len = 1;
 
 	// Fill in the msghdr structure.  `recvmsg(2)` will
@@ -101,6 +104,8 @@ recvfd(int sd, int *fdp)
 	ret = recvmsg(sd, &mh, 0);
 	if (ret <= 0)
 		return ret;
+	if (ndesc != 1)
+		return -1;
 	cmsg = CMSG_FIRSTHDR(&mh);
 	if (cmsg == NULL ||
 	    cmsg->cmsg_len != CMSG_LEN(sizeof(int)) ||

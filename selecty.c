@@ -1,6 +1,7 @@
-// Demonstration of a listener process that accepts
-// incoming TCP connections and passes them to a
-// worker process over Unix domain sockets.
+// Demonstration of a listener process that accepts incoming TCP
+// connections and passes them to a worker process over Unix
+// domain sockets; those workers will then multiplex themselves
+// across the set of connections.
 //
 // Dan Cross <cross@gajendra.net>
 
@@ -33,10 +34,21 @@ sendfd(int sd, int fd)
 	struct cmsghdr *cmsg;
 	alignas(struct msghdr) char space[CMSG_SPACE(sizeof(int))];
 	int ret;
-	char dummy;
+	char ndesc;
 
-	// Construct the message header.  Points to the dummy
-	// data and the space for the control message.
+	// We send a single byte containing the number of
+	// descriptors we are sending.  This is not strictly
+	// necessary, as the number is always 1, but some
+	// implementations do not pass control data with an
+	// otherwise empty data transfer, and this is a useful
+	// value to check on the receiving side.
+	ndesc = 1;
+	memset(&iv, 0, sizeof(iv));
+	iv.iov_base = &ndesc;
+	iv.iov_len = 1;
+
+	// Construct the message header.  Points to the iovec
+	// and the space for the control message.
 	memset(&mh, 0, sizeof(mh));
 	mh.msg_iov = &iv;
 	mh.msg_iovlen = 1;
@@ -50,14 +62,6 @@ sendfd(int sd, int fd)
 	cmsg->cmsg_level = SOL_SOCKET;
 	cmsg->cmsg_type = SCM_RIGHTS;
 	memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
-
-	// We send a single byte of dummy data in case the
-	// implementation does not pass control data with an
-	// otherwise empty data transfer.
-	dummy = 0;
-	memset(&iv, 0, sizeof(iv));
-	iv.iov_base = &dummy;
-	iv.iov_len = 1;
 
 	// Loop in case there's no room in the kernel buffer
 	// to send.  Cf.Stevens et al.
@@ -80,16 +84,16 @@ recvfd(int sd, int *fdp)
 	struct cmsghdr *cmsg;
 	alignas(struct msghdr) char space[CMSG_SPACE(sizeof(int))];
 	int ret;
-	char dummy;
+	char ndesc;
 
 	if (fdp == NULL)
 		return -1;
 
-	// Fill in an iovec to receive one byte of dummy data.
+	// Fill in an iovec to receive one byte of data.
 	// Required on some systems that do not pass control
 	// messages on empty data transfers.
 	memset(&iv, 0, sizeof(iv));
-	iv.iov_base = &dummy;
+	iv.iov_base = &ndesc;
 	iv.iov_len = 1;
 
 	// Fill in the msghdr structure.  `recvmsg(2)` will
@@ -104,6 +108,8 @@ recvfd(int sd, int *fdp)
 	ret = recvmsg(sd, &mh, 0);
 	if (ret <= 0)
 		return ret;
+	if (ndesc != 1)
+		return -1;
 	cmsg = CMSG_FIRSTHDR(&mh);
 	if (cmsg == NULL ||
 	    cmsg->cmsg_len != CMSG_LEN(sizeof(int)) ||
@@ -119,54 +125,91 @@ recvfd(int sd, int *fdp)
 }
 
 void
-dispatcher(int sdworker, int port)
+dispatch(int sd, int sdworker)
 {
-	int sd, nsd;
-	struct sockaddr_in sa;
-	struct sockaddr_in client;
+	struct sockaddr_storage client;
 	socklen_t clientlen;
+	int nsd;
 
-	sd = socket(AF_INET, SOCK_STREAM, 0);
-	if (sd < 0) {
-		perror("socket");
-		close(sdworker);
+	memset(&client, 0, sizeof client);
+	clientlen = sizeof client;
+	nsd = accept(sd, (struct sockaddr *)&client, &clientlen);
+	if (nsd < 0) {
+		perror("accept");
 		exit(EXIT_FAILURE);
 	}
+	if (sendfd(sdworker, nsd) < 0) {
+		perror("sendfd");
+		exit(EXIT_FAILURE);
+	}
+	close(nsd);
+}
+
+void
+dispatcher(int sdworker, int port)
+{
+	int sd, sd6, maxsd;
+	struct sockaddr_in sa;
+	struct sockaddr_in6 sa6;
+	fd_set sds;
+
+	sd = socket(PF_INET, SOCK_STREAM, 0);
+	if (sd < 0) {
+		perror("socket");
+		exit(EXIT_FAILURE);
+	}
+	sd6 = socket(PF_INET6, SOCK_STREAM, 0);
+	if (sd6 < 0) {
+		perror("socket6");
+		exit(EXIT_FAILURE);
+	}
+
+	maxsd = sd;
+	if (sd6 > maxsd)
+		maxsd = sd6;
+
 	memset(&sa, 0, sizeof sa);
 	sa.sin_family = AF_INET;
 	sa.sin_port = htons((unsigned short)port);
 	sa.sin_addr.s_addr = htonl(INADDR_ANY);
 	if (bind(sd, (struct sockaddr *)&sa, sizeof sa) < 0) {
 		perror("bind");
-		close(sdworker);
-		close(sd);
 		exit(EXIT_FAILURE);
 	}
+
+	memset(&sa6, 0, sizeof sa6);
+	sa6.sin6_family = AF_INET6;
+	sa6.sin6_port = htons((unsigned short)port);
+	sa6.sin6_addr = in6addr_any;
+	if (bind(sd6, (struct sockaddr *)&sa6, sizeof sa6) < 0) {
+		perror("bind6");
+		exit(EXIT_FAILURE);
+	}
+
 	if (listen(sd, 255) < 0) {
 		perror("listen");
-		close(sdworker);
-		close(sd);
+		exit(EXIT_FAILURE);
+	}
+
+	if (listen(sd6, 255) < 0) {
+		perror("listen6");
 		exit(EXIT_FAILURE);
 	}
 
 	for (;;) {
-		memset(&client, 0, sizeof client);
-		clientlen = sizeof client;
-		nsd = accept(sd, (struct sockaddr *)&client, &clientlen);
-		if (nsd < 0) {
-			perror("accept");
-			break;
+		FD_ZERO(&sds);
+		FD_SET(sd, &sds);
+		FD_SET(sd6, &sds);
+
+		if (select(maxsd + 1, &sds, NULL, NULL, NULL) < 0) {
+			perror("select");
+			exit(EXIT_FAILURE);
 		}
-		if (sendfd(sdworker, nsd) < 0) {
-			perror("sendfd");
-			close(nsd);
-			break;
-		}
-		close(nsd);
+		if (FD_ISSET(sd, &sds))
+			dispatch(sd, sdworker);
+		if (FD_ISSET(sd6, &sds))
+			dispatch(sd6, sdworker);
 	}
-	close(sdworker);
-	close(sd);
-	exit(EXIT_FAILURE);
 }
 
 static bool
@@ -198,25 +241,22 @@ echo(int sd)
 void
 worker(int sddispatcher)
 {
-	int sd, nsds, maxsd, flags;
+	int sd, nsds, maxsd, flags, ret;
 	fd_set allsds, rsds;
 
 	flags = fcntl(sddispatcher, F_GETFL, 0);
 	if (flags < 0) {
 		perror("fcntl get flags");
-		close(sddispatcher);
-		return;
+		exit(EXIT_FAILURE);
 	}
 	if (fcntl(sddispatcher, F_SETFL, flags | O_NONBLOCK) < 0) {
 		perror("fcntl set flags");
-		close(sddispatcher);
-		return;
+		exit(EXIT_FAILURE);
 	}
 	if (sddispatcher != 0) {
 		if (dup2(sddispatcher, 0) < 0) {
 			perror("dup2");
-			close(sddispatcher);
-			return;
+			exit(EXIT_FAILURE);
 		}
 		close(sddispatcher);
 	}
@@ -229,7 +269,7 @@ worker(int sddispatcher)
 		nsds = select(maxsd + 1, &rsds, NULL, NULL, NULL);
 		if (nsds < 0) {
 			perror("select");
-			return;
+			exit(EXIT_FAILURE);
 		}
 		for (sd = 1; sd <= maxsd; sd++) {
 			if (FD_ISSET(sd, &rsds)) {
@@ -242,11 +282,14 @@ worker(int sddispatcher)
 			}
 		}
 		if (FD_ISSET(0, &rsds)) {
-			if (recvfd(0, &sd) < 0) {
+			ret = recvfd(0, &sd);
+			if (ret < 0) {
 				if (errno == EWOULDBLOCK)
 					continue;
-				break;
+				exit(EXIT_FAILURE);
 			}
+			if (ret == 0)
+				break;
 			printf("pid %d won the race for sd %d\n", getpid(), sd);
 			if (sd > maxsd)
 				maxsd = sd;
