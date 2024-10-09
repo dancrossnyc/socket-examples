@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"log"
 	"net"
+	"os"
 	"reflect"
 )
 
@@ -13,8 +14,8 @@ func check(ctx string, err error) {
 	}
 }
 
-func genload(w chan bool) {
-	conn, err := net.Dial("tcp", "prithvi:8200")
+func genload(address string, done chan bool) {
+	conn, err := net.Dial("tcp", address)
 	check("dial", err)
 	defer conn.Close()
 	data := make([]byte, 1024)
@@ -34,15 +35,18 @@ func genload(w chan bool) {
 			log.Fatal("data mismatch")
 		}
 	}
-	w <- true
+	done <- true
 }
 
 func main() {
-	w := make(chan bool)
+	if len(os.Args) != 2 {
+		log.Fatal("Usage: loadgen host:port")
+	}
+	done := make(chan bool)
 	for k := 0; k < 1000; k++ {
-		go genload(w)
+		go genload(os.Args[1], done)
 	}
 	for k := 0; k < 1000; k++ {
-		<-w
+		<-done
 	}
 }
