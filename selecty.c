@@ -18,12 +18,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 
 // Sends a file descripter, `fd`, over a Unix domain socket `sd`
-// via the 4.4BSD access rights passing mechanism.
+// via the POSIX access rights passing mechanism.
 //
 // Returns 1 on success, -1 on failure.
 int
@@ -32,9 +33,9 @@ sendfd(int sd, int fd)
 	struct msghdr mh;
 	struct iovec iv;
 	struct cmsghdr *cmsg;
-	alignas(struct msghdr) char space[CMSG_SPACE(sizeof(int))];
+	alignas(struct msghdr) unsigned char space[CMSG_SPACE(sizeof(int))];
 	int ret;
-	char ndesc;
+	uint8_t ndesc;
 
 	// We send a single byte containing the number of
 	// descriptors we are sending.  This is not strictly
@@ -82,9 +83,9 @@ recvfd(int sd, int *fdp)
 	struct msghdr mh;
 	struct iovec iv;
 	struct cmsghdr *cmsg;
-	alignas(struct msghdr) char space[CMSG_SPACE(sizeof(int))];
+	alignas(struct msghdr) unsigned char space[CMSG_SPACE(sizeof(int))];
 	int ret;
-	char ndesc;
+	uint8_t ndesc;
 
 	if (fdp == NULL)
 		return -1;
@@ -220,8 +221,8 @@ dispatcher(int sdworker, int port)
 static bool
 echo(int sd)
 {
-	char *p;
-	char buf[1024];
+	unsigned char *p;
+	unsigned char buf[1024];
 	ssize_t nb, wb;
 
 	nb = read(sd, buf, sizeof buf);
