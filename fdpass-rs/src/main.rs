@@ -1,9 +1,9 @@
 use libc::socketpair;
 use libc::{c_int, c_void};
-use libc::{iovec, cmsghdr, msghdr, recvmsg, sendmsg};
+use libc::{cmsghdr, iovec, msghdr, recvmsg, sendmsg};
 use libc::{AF_UNIX, SCM_RIGHTS, SOCK_STREAM, SOL_SOCKET};
 use libc::{CMSG_DATA, CMSG_FIRSTHDR, CMSG_LEN, CMSG_NXTHDR, CMSG_SPACE};
-use libc::{MSG_TRUNC, MSG_CTRUNC};
+use libc::{MSG_CTRUNC, MSG_TRUNC};
 
 #[cfg(not(target_env = "gnu"))]
 type MsgLen = libc::socklen_t;
@@ -59,8 +59,8 @@ union CMsgInt {
 }
 
 impl CMsgInt {
-    fn as_mut_ptr(&mut self) -> *mut c_void {
-        unsafe { self.space.as_mut_ptr() }.cast()
+    fn as_mut_ptr(&mut self) -> *mut u8 {
+        unsafe { self.space.as_mut_ptr() }
     }
 }
 
