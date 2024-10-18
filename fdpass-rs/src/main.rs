@@ -4,6 +4,11 @@ use libc::{iovec, msghdr, recvmsg, sendmsg};
 use libc::{AF_UNIX, SCM_RIGHTS, SOCK_SEQPACKET, SOL_SOCKET};
 use libc::{CMSG_DATA, CMSG_FIRSTHDR, CMSG_LEN, CMSG_NXTHDR, CMSG_SPACE};
 
+#[cfg(target_env = "gnu")]
+type MsgLen = libc::size_t;
+#[cfg(not(target_env = "gnu"))]
+type MsgLen = libc::c_uint;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Sock(c_int);
 
@@ -32,11 +37,11 @@ pub fn sendfd(fd: c_int, sd: Sock) {
         msg_iov: &mut iov,
         msg_iovlen: 1,
         msg_control: space.as_mut_ptr() as *mut c_void,
-        msg_controllen: space_len,
+        msg_controllen: space_len as MsgLen,
         ..zmh
     };
     let cmsg = unsafe { &mut *CMSG_FIRSTHDR(&mut mh) };
-    cmsg.cmsg_len = unsafe { CMSG_LEN(C_INT_SIZE) } as usize;
+    cmsg.cmsg_len = unsafe { CMSG_LEN(C_INT_SIZE) } as MsgLen;
     cmsg.cmsg_level = SOL_SOCKET;
     cmsg.cmsg_type = SCM_RIGHTS;
     unsafe {
@@ -61,11 +66,11 @@ pub fn recvfd(sd: Sock) -> c_int {
         msg_iov: &mut iov,
         msg_iovlen: 1,
         msg_control: space.as_mut_ptr() as *mut c_void,
-        msg_controllen: space_len,
+        msg_controllen: space_len as MsgLen,
         ..zmh
     };
     let cmsg = unsafe { &mut *CMSG_FIRSTHDR(&mut mh) };
-    cmsg.cmsg_len = unsafe { CMSG_LEN(C_INT_SIZE) } as usize;
+    cmsg.cmsg_len = unsafe { CMSG_LEN(C_INT_SIZE) } as MsgLen;
     cmsg.cmsg_level = SOL_SOCKET;
     cmsg.cmsg_type = SCM_RIGHTS;
     unsafe {
