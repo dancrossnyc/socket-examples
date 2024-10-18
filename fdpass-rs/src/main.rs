@@ -13,6 +13,12 @@ type MsgLen = libc::size_t;
 #[derive(Clone, Copy, Debug)]
 pub struct Sock(c_int);
 
+#[repr(C)]
+union CMsgInt {
+    _align: cmsghdr,
+    space: [u8; unsafe { CMSG_SPACE(C_INT_SIZE) } as usize],
+}
+
 pub fn socks() -> (Sock, Sock) {
     let mut sds = [0, 0];
     if unsafe { socketpair(AF_UNIX, SOCK_STREAM, 0, sds.as_mut_ptr()) } < 0 {
@@ -25,8 +31,8 @@ const C_INT_SIZE: u32 = std::mem::size_of::<c_int>() as u32;
 const ZMSGHDR: msghdr = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
 
 pub fn sendfd(fd: c_int, sd: Sock) {
-    let mut space = vec![0u8; unsafe { CMSG_SPACE(C_INT_SIZE) } as usize];
-    let space_len = space.len();
+    let mut space = std::mem::MaybeUninit::<CMsgInt>::zeroed();
+    let space = space.as_mut_ptr();
     let mut dummy = 1u8;
     let mut iov = iovec {
         iov_base: &mut dummy as *mut u8 as *mut c_void,
@@ -35,8 +41,8 @@ pub fn sendfd(fd: c_int, sd: Sock) {
     let mh = msghdr {
         msg_iov: &mut iov,
         msg_iovlen: 1,
-        msg_control: space.as_mut_ptr().cast(),
-        msg_controllen: space_len as MsgLen,
+        msg_control: space.cast(),
+        msg_controllen: std::mem::size_of::<CMsgInt>() as MsgLen,
         ..ZMSGHDR
     };
     let cmsg = unsafe { &mut *CMSG_FIRSTHDR(&mh) };
@@ -47,26 +53,15 @@ pub fn sendfd(fd: c_int, sd: Sock) {
         let dp = CMSG_DATA(cmsg).cast();
         std::ptr::write(dp, fd);
     }
+    #[cfg(not(miri))]
     if unsafe { sendmsg(sd.0, &mh, 0) } < 0 {
         panic!("sendmsg failed: {}", std::io::Error::last_os_error())
     }
 }
 
-#[repr(C)]
-union CMsgInt {
-    _align: cmsghdr,
-    space: [u8; unsafe { CMSG_SPACE(C_INT_SIZE) } as usize],
-}
-
-impl CMsgInt {
-    fn as_mut_ptr(&mut self) -> *mut u8 {
-        unsafe { self.space.as_mut_ptr() }
-    }
-}
-
 pub fn recvfd(sd: Sock) -> c_int {
-    let mut space: CMsgInt = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
-    let space_len = std::mem::size_of::<CMsgInt>();
+    let mut space = std::mem::MaybeUninit::<CMsgInt>::zeroed();
+    let space = space.as_mut_ptr();
     let mut dummy = 0u8;
     let mut iov = iovec {
         iov_base: &mut dummy as *mut u8 as *mut c_void,
@@ -75,11 +70,12 @@ pub fn recvfd(sd: Sock) -> c_int {
     let mut mh = msghdr {
         msg_iov: &mut iov,
         msg_iovlen: 1,
-        msg_control: space.as_mut_ptr().cast(),
-        msg_controllen: space_len as MsgLen,
+        msg_control: space.cast(),
+        msg_controllen: std::mem::size_of::<CMsgInt>() as MsgLen,
         ..ZMSGHDR
     };
     let cmsg = unsafe { &mut *CMSG_FIRSTHDR(&mh) };
+    #[cfg(not(miri))]
     if unsafe { recvmsg(sd.0, &mut mh, 0) } < 0 {
         panic!("sendmsg failed: {}", std::io::Error::last_os_error());
     }
