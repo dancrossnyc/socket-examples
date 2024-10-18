@@ -109,6 +109,8 @@ recvfd(int sd, int *fdp)
 	ret = recvmsg(sd, &mh, 0);
 	if (ret <= 0)
 		return ret;
+	if ((mh.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) != 0)
+		return -1;
 	if (ndesc != 1)
 		return -1;
 	cmsg = CMSG_FIRSTHDR(&mh);
