@@ -1,7 +1,7 @@
 use libc::socketpair;
 use libc::{c_int, c_void};
 use libc::{iovec, msghdr, recvmsg, sendmsg};
-use libc::{AF_UNIX, SCM_RIGHTS, SOCK_SEQPACKET, SOL_SOCKET};
+use libc::{AF_UNIX, SCM_RIGHTS, SOCK_STREAM, SOL_SOCKET};
 use libc::{CMSG_DATA, CMSG_FIRSTHDR, CMSG_LEN, CMSG_NXTHDR, CMSG_SPACE};
 
 #[cfg(target_env = "gnu")]
@@ -15,7 +15,7 @@ pub struct Sock(c_int);
 pub fn socks() -> (Sock, Sock) {
     let mut sds = [0, 0];
     unsafe {
-        if socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sds.as_mut_ptr()) < 0 {
+        if socketpair(AF_UNIX, SOCK_STREAM, 0, sds.as_mut_ptr()) < 0 {
             panic!("socketpair failed: {}", std::io::Error::last_os_error());
         }
     }
